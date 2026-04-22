@@ -126,10 +126,26 @@ const payBill = async (req, res) => {
 // ❌ DELETE BILL
 const deleteBill = async (req, res) => {
     try {
+        const bill = await Bill.findById(req.params.id);
+
+        if (!bill) {
+            return res.status(404).json({ message: "Bill not found" });
+        }
+
+        // ✅ delete related transactions
+        await Transaction.deleteMany({
+            to: bill.name,
+            category: "Bills",
+            user: req.user.email
+        });
+
+        // ✅ delete bill
         await Bill.findByIdAndDelete(req.params.id);
-        res.json({ success: true });
+
+        res.json({ message: "Bill and related transactions deleted" });
+
     } catch (err) {
-        res.status(500).json(err);
+        res.status(500).json({ message: err.message });
     }
 };
 

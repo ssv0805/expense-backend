@@ -1,48 +1,71 @@
 const Transaction = require("../models/transaction");
-const Bill = require("../models/bill")
+const Bill = require("../models/bill");
 
 // ➕ ADD TRANSACTION
 const addTransaction = async (req, res) => {
     try {
-        const { type, amount, category, note, billId, paymentMethod } = req.body;
+        const { category, amount, to ,paymentMethod,payment} = req.body;
 
-        // 1️⃣ Create transaction
+        const today = new Date();
+
+        
+        if (category.toLowerCase() === "bills") {
+
+            // find bill by name
+            const bill = await Bill.findOne({
+                name: to,
+                user: req.user.email
+            });
+
+            if (bill) {
+
+                
+                if (
+                    bill.status === "paid_on_time" ||
+                    bill.status === "paid_late"
+                ) {
+                    return res.status(400).json({
+                        message: "Bill already paid"
+                    });
+                }
+
+                
+                bill.lastPaidDate = today;
+
+                if (today > new Date(bill.dueDate)) {
+                    bill.status = "paid_late";
+                } else {
+                    bill.status = "paid_on_time";
+                }
+
+                await bill.save();
+
+            } else {
+                // ✅ if bill not found → create it
+                const newBill = new Bill({
+                    name: to,
+                    amount,
+                    paymentMethod:payment,
+                    category: "Bills",
+                    dueDate: today,
+                    nextDueDate: today,
+                    status: "paid_on_time",
+                    lastPaidDate: today,
+                    user: req.user.email
+                });
+
+                await newBill.save();
+            }
+        }
+
+        // ✅ create transaction (normal)
         const transaction = new Transaction({
-            type,
-            amount,
-            category,
-            note,
-            paymentMethod,
-            billId: billId || null,
-            user: req.user.email
+            ...req.body,
+            user: req.user.email,
+            date: req.body.date || new Date().toISOString().split("T")[0]
         });
 
         const saved = await transaction.save();
-
-        // 2️⃣ IF THIS TRANSACTION IS FOR A BILL → UPDATE BILL
-        if (billId) {
-            const bill = await Bill.findById(billId);
-
-            if (bill) {
-                const today = new Date();
-
-                // check if paid after due date
-                const isLate = today > new Date(bill.nextDueDate);
-
-                bill.lastPaidDate = today;
-
-                // next due date logic (monthly)
-                const nextDate = new Date(bill.nextDueDate);
-                nextDate.setMonth(nextDate.getMonth() + 1);
-
-                bill.nextDueDate = nextDate;
-
-                bill.status = isLate ? "paid-late" : "paid";
-
-                await bill.save();
-                
-            }
-        }
 
         res.status(201).json(saved);
 
@@ -53,11 +76,11 @@ const addTransaction = async (req, res) => {
 };
 
 
-// 📥 GET TRANSACTIONS
+
 const getTransactions = async (req, res) => {
     try {
         const data = await Transaction.find({ user: req.user.email })
-            .populate("billId"); // 👈 IMPORTANT (for frontend)
+            .populate("billId"); // keep this
 
         res.json(data);
     } catch (err) {
@@ -66,12 +89,12 @@ const getTransactions = async (req, res) => {
 };
 
 
-// ❌ DELETE TRANSACTION
+
 const deleteTransaction = async (req, res) => {
     try {
         const transaction = await Transaction.findById(req.params.id);
 
-        // if deleting a bill-linked transaction → revert bill
+        // revert bill if linked
         if (transaction?.billId) {
             const bill = await Bill.findById(transaction.billId);
 

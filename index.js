@@ -58,6 +58,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/transaction", require("./routes/transaction"));
 app.use("/uploads", express.static("uploads"))
 app.use("/api/bills",billRoutes)
+app.use("/api/budget", require("./routes/budget"));
 
 //app.use("/income", require("./routes/income"))
 //app.use("/expense", require("./routes/expense"))
