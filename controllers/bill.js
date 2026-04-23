@@ -1,15 +1,19 @@
 const Bill = require("../models/bill");
-const Transaction=require("../models/transaction")
+const Transaction = require("../models/transaction");
 
+// ✅ helper (removes timestamp)
+const formatDate = (date) => {
+    return new Date(date).toISOString().split("T")[0];
+};
+
+
+
+// ➕ ADD BILL
 const addBill = async (req, res) => {
     try {
         const { name, amount, category, frequency, dueDate, paymentMethod } = req.body;
 
-        const parsedDate = new Date(dueDate);
-
-        if (isNaN(parsedDate)) {
-            return res.status(400).json({ message: "Invalid date" });
-        }
+        const formattedDate = formatDate(dueDate);
 
         const bill = new Bill({
             name,
@@ -17,11 +21,10 @@ const addBill = async (req, res) => {
             category,
             frequency,
             paymentMethod,
-            dueDate: parsedDate,
-
-            // ✅ IMPORTANT
-            nextDueDate: parsedDate,
-
+            dueDate: formattedDate,
+            nextDueDate: formattedDate,
+            lastPaidDate: null,
+            status: "pending",
             user: req.user.email
         });
 
@@ -35,42 +38,28 @@ const addBill = async (req, res) => {
 };
 
 
+
+// 📥 GET BILLS (CURRENT MONTH ONLY)
 const getBills = async (req, res) => {
     try {
         const bills = await Bill.find({ user: req.user.email });
 
-        const today = new Date();
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-        const formattedBills = bills.map((bill) => {
+        const filteredBills = bills.filter((bill) => {
+            if (!bill.dueDate) return false;
 
-            // mark overdue in memory (optional)
-            if (
-                bill.status !== "paid_on_time" &&
-                bill.status !== "paid_late" &&
-                new Date(bill.dueDate) < today
-            ) {
-                bill.status = "overdue";
-            }
+            const d = new Date(bill.dueDate);
 
-            return {
-                ...bill._doc,
-
-                
-                dueDate: bill.dueDate
-                    ? new Date(bill.dueDate).toISOString().split("T")[0]
-                    : null,
-
-                lastPaidDate: bill.lastPaidDate
-                    ? new Date(bill.lastPaidDate).toISOString().split("T")[0]
-                    : null,
-
-                nextDueDate: bill.nextDueDate
-                    ? new Date(bill.nextDueDate).toISOString().split("T")[0]
-                    : null
-            };
+            return (
+                d.getMonth() === currentMonth &&
+                d.getFullYear() === currentYear
+            );
         });
 
-        res.json(formattedBills);
+        res.json(filteredBills);
 
     } catch (err) {
         console.log(err);
@@ -79,6 +68,8 @@ const getBills = async (req, res) => {
 };
 
 
+
+// 💸 PAY BILL
 const payBill = async (req, res) => {
     try {
         const bill = await Bill.findById(req.params.id);
@@ -87,20 +78,21 @@ const payBill = async (req, res) => {
             return res.status(404).json({ message: "Bill not found" });
         }
 
-        const today = new Date();
-        const isLate = today > new Date(bill.dueDate);
+        const today = formatDate(new Date());
 
-        // 1️⃣ update bill
+        const isLate = new Date(today) > new Date(bill.dueDate);
+
+        // ✅ update bill
         bill.lastPaidDate = today;
         bill.status = isLate ? "paid_late" : "paid_on_time";
 
         await bill.save();
 
-        // 2️⃣ CREATE EXPENSE TRANSACTION AUTOMATICALLY
+        // ✅ create transaction automatically
         const transaction = new Transaction({
             date: today,
             type: "expense",
-            category: bill.category,
+            category: "Bills",
             amount: bill.amount,
             payment: bill.paymentMethod,
             source: "bill",
@@ -111,7 +103,7 @@ const payBill = async (req, res) => {
         await transaction.save();
 
         res.json({
-            message: "Bill paid and transaction created",
+            message: "Bill paid",
             bill,
             transaction
         });
@@ -123,7 +115,8 @@ const payBill = async (req, res) => {
 };
 
 
-// ❌ DELETE BILL
+
+// ❌ DELETE BILL + RELATED TRANSACTIONS
 const deleteBill = async (req, res) => {
     try {
         const bill = await Bill.findById(req.params.id);
@@ -142,12 +135,13 @@ const deleteBill = async (req, res) => {
         // ✅ delete bill
         await Bill.findByIdAndDelete(req.params.id);
 
-        res.json({ message: "Bill and related transactions deleted" });
+        res.json({ message: "Bill and transactions deleted" });
 
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
 };
+
 
 module.exports = {
     addBill,

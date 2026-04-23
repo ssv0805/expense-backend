@@ -4,7 +4,7 @@ const billSchema = new mongoose.Schema({
     name: String,
     amount: Number,
     category: String,
-    paymentMethod: String, // ✅ ADD THIS
+    paymentMethod: String,
 
     frequency: {
         type: String,
@@ -12,13 +12,14 @@ const billSchema = new mongoose.Schema({
         default: "monthly"
     },
 
+    // ✅ CHANGE DATE → STRING
     dueDate: {
-        type: Date, 
+        type: String,
         required: true
     },
 
-    nextDueDate: Date,
-    lastPaidDate: Date,
+    nextDueDate: String,
+    lastPaidDate: String,
 
     status: {
         type: String,
@@ -27,6 +28,6 @@ const billSchema = new mongoose.Schema({
     },
 
     user: String
-}, { timestamps: true });
+}, { timestamps: false }); 
 
 module.exports = mongoose.model("Bill", billSchema);

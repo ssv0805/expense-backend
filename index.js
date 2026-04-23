@@ -1,4 +1,4 @@
-const express = require("express");  
+const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
 const multer = require("multer")
@@ -8,7 +8,8 @@ const fs = require('fs');
 const Transaction = require("./models/transaction");
 const auth = require("./middleware/auth");
 const Session = require("./models/session");
-const billRoutes=require("./routes/bill")
+const billRoutes = require("./routes/bill")
+const Bill = require("./models/bill")
 
 const bcrypt = require("bcrypt")
 const { nanoid } = require("nanoid")
@@ -26,28 +27,28 @@ let isRunning = false;
 const app = express();
 
 connect()
-  .then(() => {
-    console.log("MongoDB connected");
-  })
-  .catch((err) => {
-    console.error("MongoDB error:", err);
-  });
+    .then(() => {
+        console.log("MongoDB connected");
+    })
+    .catch((err) => {
+        console.error("MongoDB error:", err);
+    });
 
 
 const allowedOrigins = [
-  "http://localhost:5173",
-  process.env.CLIENT_URL
+    "http://localhost:5173",
+    process.env.CLIENT_URL
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
+    credentials: true
 }));
 
 
@@ -57,7 +58,7 @@ app.use(cookieParser())
 app.use(express.urlencoded({ extended: true }));
 app.use("/transaction", require("./routes/transaction"));
 app.use("/uploads", express.static("uploads"))
-app.use("/api/bills",billRoutes)
+app.use("/api/bills", billRoutes)
 app.use("/api/budget", require("./routes/budget"));
 
 //app.use("/income", require("./routes/income"))
@@ -86,21 +87,21 @@ const validateRow = (item, index) => {
 
     // DATE validation
     if (!item.Date) {
-    errors.push(`Row ${index + 1}: Date is required`);
-} else {
-    const formattedDate = formatDate(item.Date);
-
-    if (!formattedDate) {
-        errors.push(`Row ${index + 1}: Invalid date format`);
+        errors.push(`Row ${index + 1}: Date is required`);
     } else {
-        const inputDate = new Date(formattedDate);
-        const today = new Date();
+        const formattedDate = formatDate(item.Date);
 
-        if (inputDate > today) {
-            errors.push(`Row ${index + 1}: Date cannot be in future`);
+        if (!formattedDate) {
+            errors.push(`Row ${index + 1}: Invalid date format`);
+        } else {
+            const inputDate = new Date(formattedDate);
+            const today = new Date();
+
+            if (inputDate > today) {
+                errors.push(`Row ${index + 1}: Date cannot be in future`);
+            }
         }
     }
-}
 
     // TYPE validation (income / expense)
     if (!item.Type || !["income", "expense"].includes(item.Type.toLowerCase())) {
@@ -282,11 +283,11 @@ app.post("/login", async (req, res) => {
             email: user.email
         })
         //res.cookie(name, value [, options])
-       res.cookie("sessionId", sessionId, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
-});
+        res.cookie("sessionId", sessionId, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+        });
         return res.status(200).json({
             success: true,
             message: "Login successful",
@@ -344,15 +345,15 @@ app.post("/signup", async (req, res) => {
 app.post("/logout", async (req, res) => {
     const sessionId = req.cookies.sessionId;
 
-    if (sessionId ) {
+    if (sessionId) {
         await Session.deleteOne({ sessionId });
     }
 
     res.clearCookie("sessionId", {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
-});
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
+    });
 
     return res.status(200).json({
         success: true,
@@ -364,47 +365,81 @@ app.post("/logout", async (req, res) => {
 cron.schedule("*/5 * * * * *", async () => {
     if (isRunning || uploadQueue.length === 0) return;
 
-    isRunning = true
-
-    console.log(" Running cron job...");
+    isRunning = true;
 
     const job = uploadQueue.shift();
-    const batch = job.data
+    const batch = job.data;
 
     const formattedBatch = batch.map((item) => ({
         date: formatDate(item.Date),
-
-        type:
-            item.Type && item.Type.toLowerCase() === "income"
-                ? "income"
-                : "expense",
-
+        type: item.Type?.toLowerCase() === "income" ? "income" : "expense",
         category: item.Category,
-
         amount: Number(item.Amount),
-
         payment: item.Payment,
-
         source: item.Source,
-
         to: item.To,
-
         user: job.user
     }));
 
     try {
-        await Transaction.insertMany(formattedBatch);
-        console.log(`Inserted batch`);
+        for (const item of formattedBatch) {
+
+            await Transaction.create(item);
+
+            if (item.category.toLowerCase() === "bills") {
+
+                const existingBill = await Bill.findOne({
+                    name: item.to,
+                    user: item.user,
+                    dueDate: item.date   // 🔥 THIS FIXES YOUR ISSUE
+                });
+
+                const today = item.date;
+
+                if (existingBill) {
+
+                    if (
+                        existingBill.status !== "paid_on_time" &&
+                        existingBill.status !== "paid_late"
+                    ) {
+                        existingBill.lastPaidDate = today;
+
+                        existingBill.status =
+                            today > existingBill.dueDate
+                                ? "paid_late"
+                                : "paid_on_time";
+
+                        await existingBill.save();
+                    }
+
+                } else {
+
+                    await Bill.create({
+                        name: item.to,
+                        amount: item.amount,
+                        paymentMethod: item.payment,
+                        category: "Bills",
+                        dueDate: today,
+                        nextDueDate: today,
+                        status: "paid_on_time",
+                        lastPaidDate: today,
+                        user: item.user
+                    });
+                }
+            }
+        }
+
+        console.log("Batch inserted");
+
     } catch (err) {
-        console.log(" Insert error:", err.message);
+        console.log(err.message);
     }
 
-    isRunning = false
-}
-);
+    isRunning = false;
+});
 
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
