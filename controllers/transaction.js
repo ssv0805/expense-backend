@@ -36,7 +36,7 @@ const exportTransactions = async (req, res) => {
         
         res.setHeader(
             "Content-Disposition",
-            "attachment; filename=Transactions.xlsx"
+            "attachment; filename=transactions.xlsx"
         );
 
         res.setHeader(
