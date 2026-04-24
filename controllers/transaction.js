@@ -1,6 +1,78 @@
 const Transaction = require("../models/transaction");
 const Bill = require("../models/bill");
 
+const XLSX = require("xlsx");
+
+const exportTransactions = async (req, res) => {
+    try {
+        const transactions = await Transaction.find({
+            user: req.user.email
+        });
+
+        
+        const data = transactions.map((t) => ({
+            Date: t.date,
+            Type: t.type,
+            Category: t.category,
+            Amount: t.amount,
+            Payment: t.payment || "",
+            Source: t.source || "",
+            To: t.to || ""
+        }));
+
+       
+        const ws = XLSX.utils.json_to_sheet(data);
+
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+
+        
+        const buffer = XLSX.write(wb, {
+            type: "buffer",
+            bookType: "xlsx"
+        });
+
+        
+        res.setHeader(
+            "Content-Disposition",
+            "attachment; filename=Transactions.xlsx"
+        );
+
+        res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+
+        res.send(buffer);
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+
+const updateTransaction = async (req, res) => {
+    try {
+        const updated = await Transaction.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true }
+        );
+
+        if (!updated) {
+            return res.status(404).json({ message: "Transaction not found" });
+        }
+
+        res.json(updated);
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ message: "Update failed" });
+    }
+};
+
+
+
 // ➕ ADD TRANSACTION
 const addTransaction = async (req, res) => {
     try {
@@ -117,5 +189,7 @@ const deleteTransaction = async (req, res) => {
 module.exports = {
     addTransaction,
     getTransactions,
-    deleteTransaction
+    deleteTransaction,
+    updateTransaction,
+    exportTransactions
 };

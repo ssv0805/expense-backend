@@ -21,7 +21,7 @@ const transactionSchema = new mongoose.Schema({
     payment: String,   
     source:{
         type:String, 
-        default:"manual" 
+        
     }, 
     to: String,       
     user: {
