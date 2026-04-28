@@ -3,13 +3,21 @@ const Bill = require("../models/bill");
 
 const XLSX = require("xlsx");
 
+
 const exportTransactions = async (req, res) => {
     try {
+
+        if (!req.user) {
+            return res.status(401).json({
+                message: "Session expired. Please login again."
+            });
+        }
+
         const transactions = await Transaction.find({
             user: req.user.email
         });
 
-        
+
         const data = transactions.map((t) => ({
             Date: t.date,
             Type: t.type,
@@ -20,20 +28,20 @@ const exportTransactions = async (req, res) => {
             To: t.to || ""
         }));
 
-       
+
         const ws = XLSX.utils.json_to_sheet(data);
 
-        
+
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Transactions");
 
-        
+
         const buffer = XLSX.write(wb, {
             type: "buffer",
             bookType: "xlsx"
         });
 
-        
+
         res.setHeader(
             "Content-Disposition",
             "attachment; filename=transactions.xlsx"
@@ -76,11 +84,11 @@ const updateTransaction = async (req, res) => {
 // ➕ ADD TRANSACTION
 const addTransaction = async (req, res) => {
     try {
-        const { category, amount, to ,paymentMethod,payment} = req.body;
+        const { category, amount, to, paymentMethod, payment } = req.body;
 
         const today = new Date();
 
-        
+
         if (category.toLowerCase() === "bills") {
 
             // find bill by name
@@ -91,7 +99,7 @@ const addTransaction = async (req, res) => {
 
             if (bill) {
 
-                
+
                 if (
                     bill.status === "paid_on_time" ||
                     bill.status === "paid_late"
@@ -101,7 +109,7 @@ const addTransaction = async (req, res) => {
                     });
                 }
 
-                
+
                 bill.lastPaidDate = today;
 
                 if (today > new Date(bill.dueDate)) {
@@ -117,7 +125,7 @@ const addTransaction = async (req, res) => {
                 const newBill = new Bill({
                     name: to,
                     amount,
-                    paymentMethod:payment,
+                    paymentMethod: payment,
                     category: "Bills",
                     dueDate: today,
                     nextDueDate: today,
@@ -147,14 +155,57 @@ const addTransaction = async (req, res) => {
     }
 };
 
+const getAllTransactions = async (req, res) => {
+    try {
+        const data = await Transaction.find({
+            user: req.user.email
+        }).sort({ date: -1 });
+
+        res.json(data);
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 
 
 const getTransactions = async (req, res) => {
     try {
-        const data = await Transaction.find({ user: req.user.email })
-            .populate("billId"); // keep this
+        const { page = 1, limit = 7, category, type, month } = req.query
 
-        res.json(data);
+        const query = { user: req.user.email }
+
+        if (category) query.category = category;
+        if (type) query.type = type
+        if (month) {
+            const startDate = new Date(new Date().getFullYear(), month - 1, 1);
+            const endDate = new Date(new Date().getFullYear(), month, 0);
+
+            query.date = {
+                $gte: startDate.toISOString().split("T")[0],
+                $lte: endDate.toISOString().split("T")[0]
+            };
+        }
+
+        const transactions = await Transaction.find(query)
+            .populate("billId")
+            .sort({ date: -1 })
+            .skip((page - 1) * limit)
+            .limit(Number(limit))
+
+        const total = await Transaction.countDocuments(query);
+
+        res.json({
+            data: transactions,
+            total,
+            page: Number(page),
+            totalPages: Math.ceil(total / limit)
+        })
+
+
+
+        
     } catch (err) {
         res.status(500).json(err);
     }
@@ -191,5 +242,6 @@ module.exports = {
     getTransactions,
     deleteTransaction,
     updateTransaction,
-    exportTransactions
+    exportTransactions,
+    getAllTransactions
 };

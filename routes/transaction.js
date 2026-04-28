@@ -7,7 +7,8 @@ const {
     getTransactions,
     deleteTransaction,
     updateTransaction,
-    exportTransactions
+    exportTransactions,
+    getAllTransactions
 } = require("../controllers/transaction");
 
 // routes
@@ -16,5 +17,6 @@ router.get("/",auth, getTransactions);
 router.delete("/:id", auth, deleteTransaction);
 router.put("/:id",auth, updateTransaction);
 router.get("/export", auth, exportTransactions);
+router.get("/all",auth, getAllTransactions);
 
 module.exports = router;  
