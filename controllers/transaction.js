@@ -1,12 +1,11 @@
 const Transaction = require("../models/transaction");
 const Bill = require("../models/bill");
-
 const XLSX = require("xlsx");
 
 
+//  EXPORT TRANSACTIONS
 const exportTransactions = async (req, res) => {
     try {
-
         if (!req.user) {
             return res.status(401).json({
                 message: "Session expired. Please login again."
@@ -16,7 +15,6 @@ const exportTransactions = async (req, res) => {
         const transactions = await Transaction.find({
             user: req.user.email
         });
-
 
         const data = transactions.map((t) => ({
             Date: t.date,
@@ -28,19 +26,14 @@ const exportTransactions = async (req, res) => {
             To: t.to || ""
         }));
 
-
         const ws = XLSX.utils.json_to_sheet(data);
-
-
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Transactions");
-
 
         const buffer = XLSX.write(wb, {
             type: "buffer",
             bookType: "xlsx"
         });
-
 
         res.setHeader(
             "Content-Disposition",
@@ -60,6 +53,7 @@ const exportTransactions = async (req, res) => {
 };
 
 
+//  UPDATE TRANSACTION
 const updateTransaction = async (req, res) => {
     try {
         const updated = await Transaction.findByIdAndUpdate(
@@ -73,6 +67,7 @@ const updateTransaction = async (req, res) => {
         }
 
         res.json(updated);
+
     } catch (err) {
         console.log(err);
         res.status(500).json({ message: "Update failed" });
@@ -80,69 +75,64 @@ const updateTransaction = async (req, res) => {
 };
 
 
-
-// ➕ ADD TRANSACTION
+//  ADD TRANSACTION (CLEAN)
 const addTransaction = async (req, res) => {
     try {
-        const { category, amount, to, paymentMethod, payment } = req.body;
+        const today = req.body.date || new Date().toISOString().split("T")[0];
+        const currentMonth = today.slice(0, 7);
 
-        const today = new Date();
+        // ✅ BILL LOGIC
+        if (req.body.category?.toLowerCase().trim() === "bills") {
 
-
-        if (category.toLowerCase() === "bills") {
-
-            // find bill by name
             const bill = await Bill.findOne({
-                name: to,
+                name: req.body.to,
                 user: req.user.email
             });
 
             if (bill) {
-
-
+                //console.log("BILL FOUND:", bill);
+                //console.log("STATUS:", bill?.status);
+                //console.log("LAST PAID MONTH:", bill?.lastPaidMonth);
+                //console.log("CURRENT MONTH:", currentMonth);
                 if (
-                    bill.status === "paid_on_time" ||
-                    bill.status === "paid_late"
+                    bill.status === "paid" &&
+                    bill.lastPaidMonth === currentMonth
                 ) {
+                    console.log("🚫 BLOCKING DUPLICATE PAYMENT");
                     return res.status(400).json({
-                        message: "Bill already paid"
+                        message: "Bill already paid for this month"
                     });
                 }
-
-
+                // ✅ Mark existing bill as paid
+                bill.status = "paid";
                 bill.lastPaidDate = today;
-
-                if (today > new Date(bill.dueDate)) {
-                    bill.status = "paid_late";
-                } else {
-                    bill.status = "paid_on_time";
-                }
+                bill.lastPaidMonth = currentMonth;
 
                 await bill.save();
 
+
             } else {
-                // ✅ if bill not found → create it
-                const newBill = new Bill({
-                    name: to,
-                    amount,
-                    paymentMethod: payment,
+                // ✅ If bill doesn't exist → create & mark paid
+                await Bill.create({
+                    name: req.body.to,
+                    amount: req.body.amount,
+                    paymentMethod: req.body.paymentMethod?.toUpperCase() || "UPI",
                     category: "Bills",
                     dueDate: today,
-                    nextDueDate: today,
-                    status: "paid_on_time",
+                    frequency: "Monthly",
+                    status: "paid",
                     lastPaidDate: today,
+                    lastPaidMonth: currentMonth,
                     user: req.user.email
                 });
-
-                await newBill.save();
             }
         }
-
-        // ✅ create transaction (normal)
+        //console.log("⚠️ SHOULD NOT REACH HERE IF BLOCKED");
+        // ✅ CREATE TRANSACTION (NO CHANGE)
         const transaction = new Transaction({
             ...req.body,
             user: req.user.email,
-            date: req.body.date || new Date().toISOString().split("T")[0]
+            date: today
         });
 
         const saved = await transaction.save();
@@ -155,6 +145,8 @@ const addTransaction = async (req, res) => {
     }
 };
 
+
+//  GET ALL TRANSACTIONS (NO PAGINATION)
 const getAllTransactions = async (req, res) => {
     try {
         const data = await Transaction.find({
@@ -169,15 +161,16 @@ const getAllTransactions = async (req, res) => {
 };
 
 
-
+//  GET TRANSACTIONS (WITH FILTER + PAGINATION)
 const getTransactions = async (req, res) => {
     try {
-        const { page = 1, limit = 7, category, type, month } = req.query
+        const { page = 1, limit = 7, category, type, month } = req.query;
 
-        const query = { user: req.user.email }
+        const query = { user: req.user.email };
 
         if (category) query.category = category;
-        if (type) query.type = type
+        if (type) query.type = type;
+
         if (month) {
             const startDate = new Date(new Date().getFullYear(), month - 1, 1);
             const endDate = new Date(new Date().getFullYear(), month, 0);
@@ -189,10 +182,10 @@ const getTransactions = async (req, res) => {
         }
 
         const transactions = await Transaction.find(query)
-            .populate("billId")
+            .populate("billId") // ✅ keep this
             .sort({ date: -1 })
             .skip((page - 1) * limit)
-            .limit(Number(limit))
+            .limit(Number(limit));
 
         const total = await Transaction.countDocuments(query);
 
@@ -201,29 +194,31 @@ const getTransactions = async (req, res) => {
             total,
             page: Number(page),
             totalPages: Math.ceil(total / limit)
-        })
+        });
 
-
-
-        
     } catch (err) {
         res.status(500).json(err);
     }
 };
 
 
-
+//  DELETE TRANSACTION (FIXED )
 const deleteTransaction = async (req, res) => {
     try {
         const transaction = await Transaction.findById(req.params.id);
 
-        // revert bill if linked
-        if (transaction?.billId) {
+        if (!transaction) {
+            return res.status(404).json({ message: "Transaction not found" });
+        }
+
+        // ✅ If linked to bill → revert bill
+        if (transaction.billId) {
             const bill = await Bill.findById(transaction.billId);
 
             if (bill) {
-                bill.status = "pending";
+                bill.status = "unpaid";   // ✅ FIXED
                 bill.lastPaidDate = null;
+                bill.lastPaidMonth = null;
                 await bill.save();
             }
         }
@@ -236,6 +231,7 @@ const deleteTransaction = async (req, res) => {
         res.status(500).json(err);
     }
 };
+
 
 module.exports = {
     addTransaction,

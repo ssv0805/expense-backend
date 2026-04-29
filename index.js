@@ -391,38 +391,34 @@ cron.schedule("*/5 * * * * *", async () => {
                 const existingBill = await Bill.findOne({
                     name: item.to,
                     user: item.user,
-                    dueDate: item.date   // 🔥 THIS FIXES YOUR ISSUE
+                    dueDate: item.date   
                 });
 
                 const today = item.date;
+                const currentMonth = today.slice(0, 7); // "2026-04"
 
                 if (existingBill) {
 
-                    if (
-                        existingBill.status !== "paid_on_time" &&
-                        existingBill.status !== "paid_late"
-                    ) {
-                        existingBill.lastPaidDate = today;
+                    //  Mark as paid
+                    existingBill.status = "paid";
+                    existingBill.lastPaidDate = today;
+                    existingBill.lastPaidMonth = currentMonth;
 
-                        existingBill.status =
-                            today > existingBill.dueDate
-                                ? "paid_late"
-                                : "paid_on_time";
-
-                        await existingBill.save();
-                    }
+                    await existingBill.save();
 
                 } else {
 
+                    //  Create NEW bill already paid
                     await Bill.create({
                         name: item.to,
                         amount: item.amount,
-                        paymentMethod: item.payment,
+                        paymentMethod: item.payment?.toUpperCase() || "UPI",
                         category: "Bills",
                         dueDate: today,
-                        nextDueDate: today,
-                        status: "paid_on_time",
+                        frequency: "Monthly",
+                        status: "paid",
                         lastPaidDate: today,
+                        lastPaidMonth: currentMonth,
                         user: item.user
                     });
                 }

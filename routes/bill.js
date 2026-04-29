@@ -3,16 +3,20 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 
 const {
-    addBill,
+    createBill,
     getBills,
+    updateBill,
+    deleteBill,
     payBill,
-    deleteBill
+    resetBillsMonthly
 } = require("../controllers/bill");
 
-// routes
-router.post("/", auth, addBill);
-router.get("/", auth, getBills);
-router.put("/:id/pay", auth, payBill);
-router.delete("/:id", auth, deleteBill);
+
+router.post("/", auth, createBill);
+router.get("/", auth , getBills);
+router.put("/:billId", auth , updateBill);
+router.delete("/:billId", auth, deleteBill);
+router.post("/pay/:billId",auth ,payBill);
+router.get("/reset", auth, resetBillsMonthly);
 
 module.exports = router;

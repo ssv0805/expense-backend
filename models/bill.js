@@ -1,33 +1,70 @@
 const mongoose = require("mongoose");
 
 const billSchema = new mongoose.Schema({
-    name: String,
-    amount: Number,
-    category: String,
-    paymentMethod: String,
-
-    frequency: {
+    name: {
         type: String,
-        enum: ["monthly", "weekly", "yearly"],
-        default: "monthly"
+        required: true
     },
 
-    // ✅ CHANGE DATE → STRING
+    amount: {
+        type: Number,
+        required: true
+    },
+
+    category: {
+        type: String,
+        required: true
+    },
+
+    // keep SAME format as your transaction (String date)
     dueDate: {
         type: String,
         required: true
     },
 
-    nextDueDate: String,
-    lastPaidDate: String,
-
-    status: {
+    // recurring type
+    frequency: {
         type: String,
-        enum: ["pending", "overdue", "paid_on_time", "paid_late"],
-        default: "pending"
+        enum: ["Monthly", "Yearly", "One-time"],
+        default: "monthly"
     },
 
-    user: String
-}, { timestamps: false }); 
+    // paid / unpaid only (overdue will be calculated)
+    status: {
+        type: String,
+        enum: ["paid", "unpaid"],
+        default: "unpaid"
+    },
+
+    // when last paid
+    lastPaidDate: {
+        type: String,
+        default: null
+    },
+
+    // used for monthly reset logic
+    lastPaidMonth: {
+        type: String, // example: "2026-04"
+        default: null
+    },
+
+    paymentMethod: {
+        type: String,
+        enum: ["UPI", "Cash", "Card", "NetBanking"],
+        default: "UPI"
+    },
+
+    // SAME as your transaction model
+    user: {
+        type: String,
+        required: true
+    },
+    billId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Bill",
+        default: null
+    }
+
+}, { timestamps: true });
 
 module.exports = mongoose.model("Bill", billSchema);
