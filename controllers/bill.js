@@ -50,7 +50,9 @@ const getBills = async (req, res) => {
         const currentMonth = today.toISOString().slice(0, 7);
 
         for (let bill of bills) {
-            const dueMonth = bill.dueDate?.slice(0, 7);
+            const dueMonth = bill.dueDate
+                ? new Date(bill.dueDate).toISOString().slice(0, 7)
+                : null;
             if (
                 bill.frequency === "Monthly" &&
                 bill.lastPaidMonth &&
@@ -83,15 +85,15 @@ const getBills = async (req, res) => {
 
             await bill.save();
         }
-    
+
 
         // ✅ SEND UPDATED DATA
         res.status(200).json(bills);
 
-} catch (err) {
-    console.log("GET BILLS ERROR:", err);
-    res.status(500).json({ message: err.message });
-}
+    } catch (err) {
+        console.log("GET BILLS ERROR:", err);
+        res.status(500).json({ message: err.message });
+    }
 };
 
 
