@@ -26,7 +26,7 @@ const billSchema = new mongoose.Schema({
     frequency: {
         type: String,
         enum: ["Monthly", "Yearly", "One-time"],
-        default: "monthly"
+        default: "Monthly"
     },
 
     // paid / unpaid only (overdue will be calculated)
