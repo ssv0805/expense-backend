@@ -206,8 +206,48 @@ app.post("/upload", auth, (req, res) => {
             }
 
 
-            data.forEach((item, index) => {
-                const errors = validateRow(item, index);
+            const uploadedBills = new Set();
+
+            for (let index = 0; index < data.length; index++) {
+                const item = data[index];
+                let errors = validateRow(item, index);
+
+                if (
+                    item.Category &&
+                    item.Category.toString().trim().toLowerCase() === "bills"
+                ) {
+                    const billName = item.To?.toString().trim().toLowerCase();
+                    const formattedDate = formatDate(item.Date);
+                    const currentMonth = formattedDate?.slice(0, 7);
+
+                    if (!billName) {
+                        errors.push(`Row ${index + 1}: Bill name missing`);
+                    } else {
+                        const uniqueKey = `${billName}-${currentMonth}`;
+
+                        // duplicate inside same upload
+                        if (uploadedBills.has(uniqueKey)) {
+                            errors.push(`Row ${index + 1}: Bill already exists in upload`);
+                        } else {
+                            uploadedBills.add(uniqueKey);
+
+                            // duplicate in DB for same month
+                            const existingBill = await Bill.findOne({
+                                name: item.To,
+                                user: req.user.email,
+                                dueDate: {
+                                    $regex: `^${currentMonth}`
+                                }
+                            });
+
+                            if (existingBill) {
+                                errors.push(
+                                    `Row ${index + 1}: Bill already exists for this month`
+                                );
+                            }
+                        }
+                    }
+                }
 
                 if (errors.length > 0) {
                     invalidData.push({
@@ -218,7 +258,7 @@ app.post("/upload", auth, (req, res) => {
                 } else {
                     validData.push(item);
                 }
-            });
+            }
 
             console.log("Total Records:", data.length);
             console.log("Valid Records:", validData.length);
@@ -391,18 +431,20 @@ cron.schedule("*/5 * * * * *", async () => {
 
             if (item.category.toLowerCase() === "bills") {
 
+                const today = item.date;
+                const currentMonth = today.slice(0, 7);
+
                 const existingBill = await Bill.findOne({
                     name: item.to,
                     user: item.user,
-                    dueDate: item.date
+                    dueDate: {
+                        $regex: `^${currentMonth}`
+                    }
                 });
-
-                const today = item.date;
-                const currentMonth = today.slice(0, 7); // "2026-04"
 
                 if (existingBill) {
 
-                    //  Mark as paid
+                    // ✅ Mark as paid (do NOT create new)
                     existingBill.status = "paid";
                     existingBill.lastPaidDate = today;
                     existingBill.lastPaidMonth = currentMonth;
@@ -411,7 +453,7 @@ cron.schedule("*/5 * * * * *", async () => {
 
                 } else {
 
-                    //  Create NEW bill already paid
+                    // ✅ Only first bill of month gets created
                     await Bill.create({
                         name: item.to,
                         amount: item.amount,
@@ -427,7 +469,6 @@ cron.schedule("*/5 * * * * *", async () => {
                 }
             }
         }
-
         console.log("Batch inserted");
 
     } catch (err) {

@@ -8,12 +8,14 @@ const {
     deleteTransaction,
     updateTransaction,
     exportTransactions,
-    getAllTransactions
+    getAllTransactions,
+    getCategories
 } = require("../controllers/transaction");
 
 // routes
 router.post("/",auth, addTransaction);
 router.get("/",auth, getTransactions);
+router.get("/categories", auth, getCategories);
 router.delete("/:id", auth, deleteTransaction);
 router.put("/:id",auth, updateTransaction);
 router.get("/export", auth, exportTransactions);

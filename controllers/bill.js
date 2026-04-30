@@ -5,8 +5,6 @@ const Transaction = require("../models/transaction");
 // ✅ CREATE BILL
 const createBill = async (req, res) => {
     try {
-
-        console.log(req.body);
         const {
             name,
             amount,
@@ -16,8 +14,27 @@ const createBill = async (req, res) => {
             paymentMethod
         } = req.body;
 
+        // ✅ normalize name
+        const cleanName = name.trim().toLowerCase();
+
+        // ✅ extract month (YYYY-MM)
+        const month = dueDate.slice(0, 7);
+
+        // ✅ check duplicate bill
+        const existing = await Bill.findOne({
+            name: cleanName,
+            user: req.user.email,
+            dueDate: { $regex: `^${month}` }
+        });
+
+        if (existing) {
+            return res.status(400).json({
+                message: "Bill already exists for this month"
+            });
+        }
+
         const newBill = new Bill({
-            name,
+            name: cleanName,
             amount,
             category,
             dueDate,
@@ -32,7 +49,6 @@ const createBill = async (req, res) => {
             message: "Bill created successfully",
             bill: newBill
         });
-
 
     } catch (err) {
         res.status(500).json({ message: err.message });
