@@ -133,7 +133,9 @@ const validateRow = (item, index) => {
 };
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/')
+        const path = `./uploads/`
+        fs.mkdirSync(path, { recursive: true })
+        cb(null, path)
     },
     filename: function (req, file, cb) {
         cb(null, Date.now() + path.extname(file.originalname));
@@ -392,7 +394,7 @@ cron.schedule("*/5 * * * * *", async () => {
                 const existingBill = await Bill.findOne({
                     name: item.to,
                     user: item.user,
-                    dueDate: item.date   
+                    dueDate: item.date
                 });
 
                 const today = item.date;
