@@ -72,7 +72,7 @@ const getBills = async (req, res) => {
                 const newMonth = oldDue.getMonth() + 1;
                 const newYear = oldDue.getFullYear();
 
-                // 🔥 get last day of next month
+                // get last day of next month
                 const lastDay = new Date(newYear, newMonth + 1, 0).getDate();
 
                 // keep same day OR adjust
@@ -203,7 +203,7 @@ const resetBillsMonthly = async (req, res) => {
 
         for (let bill of bills) {
             if (
-                bill.frequency === "monthly" &&
+                bill.frequency === "Monthly" &&
                 bill.lastPaidMonth !== currentMonth
             ) {
                 bill.status = "unpaid";

@@ -158,7 +158,8 @@ app.post("/upload", auth, (req, res) => {
         if (err) {
             return res.status(400).json({
                 success: false,
-                message: "File format not supported"
+                message: "File format not supported",
+                error: err
             });
         }
 
