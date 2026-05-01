@@ -32,7 +32,7 @@ const billSchema = new mongoose.Schema({
     // paid / unpaid only (overdue will be calculated)
     status: {
         type: String,
-        enum: ["paid", "unpaid"],
+        enum: ["paid", "unpaid","closed"],
         default: "unpaid"
     },
 

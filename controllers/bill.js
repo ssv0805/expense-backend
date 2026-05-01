@@ -236,11 +236,37 @@ const resetBillsMonthly = async (req, res) => {
     }
 };
 
+const closeBill= async (req, res) => {
+    try {
+        const bill = await Bill.findOne({
+            _id: req.params.id,
+            user: req.user.email
+        });
+
+        if (!bill) {
+            return res.status(404).json({
+                message: "Bill not found"
+            });
+        }
+
+        bill.status = "closed";
+        await bill.save();
+
+        res.json({
+            message: "Bill closed successfully"
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports = {
     createBill,
     resetBillsMonthly,
     updateBill,
     deleteBill,
     payBill,
-    getBills
+    getBills,
+    closeBill
 }
