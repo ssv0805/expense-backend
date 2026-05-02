@@ -8,7 +8,7 @@ const {
     updateBill,
     deleteBill,
     payBill,
-    resetBillsMonthly,
+    //resetBillsMonthly,
     closeBill
 } = require("../controllers/bill");
 
@@ -18,7 +18,7 @@ router.get("/", auth , getBills);
 router.put("/:billId", auth , updateBill);
 router.delete("/:billId", auth, deleteBill);
 router.post("/pay/:billId",auth ,payBill);
-router.get("/reset", auth, resetBillsMonthly);
+//router.get("/reset", auth, resetBillsMonthly);
 router.put("/close/:id", auth,closeBill);
 
 module.exports = router;

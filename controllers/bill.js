@@ -5,7 +5,7 @@ const Transaction = require("../models/transaction");
 // ✅ CREATE BILL
 const createBill = async (req, res) => {
     try {
-        const {
+        let {
             name,
             amount,
             category,
@@ -14,13 +14,10 @@ const createBill = async (req, res) => {
             paymentMethod
         } = req.body;
 
-        // ✅ normalize name
         const cleanName = name.trim().toLowerCase();
-
-        // ✅ extract month (YYYY-MM)
         const month = dueDate.slice(0, 7);
 
-        // ✅ check duplicate bill
+        // 🚨 prevent duplicate (same name + month)
         const existing = await Bill.findOne({
             name: cleanName,
             user: req.user.email,
@@ -33,22 +30,18 @@ const createBill = async (req, res) => {
             });
         }
 
-        const newBill = new Bill({
+        const newBill = await Bill.create({
             name: cleanName,
             amount,
             category,
             dueDate,
             frequency,
             paymentMethod,
+            status: "unpaid",
             user: req.user.email
         });
 
-        await newBill.save();
-
-        res.status(201).json({
-            message: "Bill created successfully",
-            bill: newBill
-        });
+        res.status(201).json(newBill);
 
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -56,54 +49,37 @@ const createBill = async (req, res) => {
 };
 
 
-// ✅ GET ALL BILLS
+
+// ✅ GET BILLS (AUTO MONTH LOGIC + CLOSED SKIP)
 const getBills = async (req, res) => {
     try {
         const bills = await Bill.find({ user: req.user.email })
             .sort({ createdAt: -1 });
 
         const today = new Date();
-        const currentMonth = today.toISOString().slice(0, 7);
 
         for (let bill of bills) {
-            const dueMonth = bill.dueDate
-                ? new Date(bill.dueDate).toISOString().slice(0, 7)
-                : null;
+
+            // ❌ Do not touch closed bills
+            if (bill.status === "closed") continue;
+
+            const due = new Date(bill.dueDate);
+
+            // ✅ If unpaid & overdue → move to next month
             if (
                 bill.frequency === "Monthly" &&
-                bill.lastPaidMonth &&
-                bill.lastPaidMonth !== currentMonth &&
-                dueMonth !== currentMonth
+                bill.status === "unpaid" &&
+                due < today
             ) {
+                const nextDue = new Date(due);
+                nextDue.setMonth(nextDue.getMonth() + 1);
 
-                // ✅ 1. reset status
-                bill.status = "unpaid";
+                bill.dueDate = nextDue.toISOString().split("T")[0];
 
-                // ✅ 2. clear paid date
-                bill.lastPaidDate = null;
-
-                // ✅ 3. update due date to next month (SAFE)
-                const oldDue = new Date(bill.dueDate);
-
-                const newMonth = oldDue.getMonth() + 1;
-                const newYear = oldDue.getFullYear();
-
-                // get last day of next month
-                const lastDay = new Date(newYear, newMonth + 1, 0).getDate();
-
-                // keep same day OR adjust
-                const newDay = Math.min(oldDue.getDate(), lastDay);
-
-                const newDue = new Date(newYear, newMonth, newDay);
-
-                bill.dueDate = newDue.toISOString().split("T")[0];
+                await bill.save();
             }
-
-            await bill.save();
         }
 
-
-        // ✅ SEND UPDATED DATA
         res.status(200).json(bills);
 
     } catch (err) {
@@ -113,7 +89,8 @@ const getBills = async (req, res) => {
 };
 
 
-// PAY BILL (MAIN LOGIC )
+
+// ✅ PAY BILL (STRICT LOGIC)
 const payBill = async (req, res) => {
     try {
         const { billId } = req.params;
@@ -124,14 +101,31 @@ const payBill = async (req, res) => {
             return res.status(404).json({ message: "Bill not found" });
         }
 
-        // prevent duplicate payment
-        if (bill.status === "paid") {
-            return res.status(400).json({ message: "Bill already paid" });
+        if (bill.status === "closed") {
+            return res.status(400).json({
+                message: "Closed bill cannot be paid"
+            });
         }
 
-        // 1. Create transaction
-        const transaction = new Transaction({
-            date: new Date().toISOString(),
+        const currentMonth = new Date().toISOString().slice(0, 7);
+
+        // 🚨 prevent duplicate paid
+        const duplicatePaid = await Bill.findOne({
+            name: bill.name,
+            user: req.user.email,
+            dueDate: { $regex: `^${currentMonth}` },
+            status: "paid"
+        });
+
+        if (duplicatePaid) {
+            return res.status(400).json({
+                message: "Bill already paid for this month"
+            });
+        }
+
+        // ✅ create transaction
+        const transaction = await Transaction.create({
+            date: new Date().toISOString().split("T")[0],
             type: "expense",
             category: bill.category,
             amount: bill.amount,
@@ -142,19 +136,40 @@ const payBill = async (req, res) => {
             billId: bill._id
         });
 
-        await transaction.save();
-
-        // 2. Update bill
-        const now = new Date();
-
-
+        // ✅ mark bill paid
         bill.status = "paid";
         bill.lastPaidDate = new Date().toISOString().split("T")[0];
-        bill.lastPaidMonth = new Date().toISOString().slice(0, 7);
+        bill.lastPaidMonth = currentMonth;
 
         await bill.save();
 
-        res.status(200).json({
+
+        // ✅ CREATE NEXT MONTH BILL (IMPORTANT FEATURE)
+        const nextMonthDate = new Date(bill.dueDate);
+        nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+
+        const nextMonth = nextMonthDate.toISOString().slice(0, 7);
+
+        const nextExists = await Bill.findOne({
+            name: bill.name,
+            user: bill.user,
+            dueDate: { $regex: `^${nextMonth}` }
+        });
+
+        if (!nextExists && bill.status !== "closed") {
+            await Bill.create({
+                name: bill.name,
+                amount: bill.amount,
+                category: bill.category,
+                dueDate: nextMonthDate.toISOString().split("T")[0],
+                frequency: "Monthly",
+                paymentMethod: bill.paymentMethod,
+                status: "unpaid",
+                user: bill.user
+            });
+        }
+
+        res.json({
             message: "Bill paid successfully",
             transaction
         });
@@ -165,44 +180,50 @@ const payBill = async (req, res) => {
 };
 
 
-// DELETE BILL
-const deleteBill = async (req, res) => {
+
+// ✅ UPDATE BILL (STRICT)
+const updateBill = async (req, res) => {
     try {
         const { billId } = req.params;
 
-        const bill = await Bill.findByIdAndDelete(billId);
+        const bill = await Bill.findById(billId);
 
         if (!bill) {
             return res.status(404).json({ message: "Bill not found" });
         }
 
-        res.status(200).json({ message: "Bill deleted successfully" });
+        // 🚨 prevent editing paid bill values
+        if (bill.status === "paid") {
+            return res.status(400).json({
+                message: "Paid bill cannot be edited"
+            });
+        }
 
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
-
-
-// UPDATE BILL
-const updateBill = async (req, res) => {
-    try {
-        const { billId } = req.params;
-
-        const updatedBill = await Bill.findByIdAndUpdate(
+        const updated = await Bill.findByIdAndUpdate(
             billId,
             req.body,
             { new: true }
         );
 
-        if (!updatedBill) {
+        res.json(updated);
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+
+
+// ✅ DELETE BILL
+const deleteBill = async (req, res) => {
+    try {
+        const bill = await Bill.findByIdAndDelete(req.params.billId);
+
+        if (!bill) {
             return res.status(404).json({ message: "Bill not found" });
         }
 
-        res.status(200).json({
-            message: "Bill updated successfully",
-            bill: updatedBill
-        });
+        res.json({ message: "Deleted" });
 
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -210,33 +231,9 @@ const updateBill = async (req, res) => {
 };
 
 
-// MONTHLY RESET CHECK (IMPORTANT)
-const resetBillsMonthly = async (req, res) => {
-    try {
-        const currentMonth = new Date().toISOString().slice(0, 7);
 
-        const bills = await Bill.find({ user: req.user.email });
-
-        for (let bill of bills) {
-            if (
-                bill.frequency === "Monthly" &&
-                bill.lastPaidMonth !== currentMonth
-            ) {
-                bill.status = "unpaid";
-                await bill.save();
-            }
-        }
-
-        res.status(200).json({
-            message: "Bills checked for monthly reset"
-        });
-
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
-
-const closeBill= async (req, res) => {
+// ✅ CLOSE BILL (STOP FUTURE GENERATION)
+const closeBill = async (req, res) => {
     try {
         const bill = await Bill.findOne({
             _id: req.params.id,
@@ -244,29 +241,26 @@ const closeBill= async (req, res) => {
         });
 
         if (!bill) {
-            return res.status(404).json({
-                message: "Bill not found"
-            });
+            return res.status(404).json({ message: "Bill not found" });
         }
 
         bill.status = "closed";
         await bill.save();
 
-        res.json({
-            message: "Bill closed successfully"
-        });
+        res.json({ message: "Bill closed" });
 
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
 };
 
+
+
 module.exports = {
     createBill,
-    resetBillsMonthly,
+    getBills,
+    payBill,
     updateBill,
     deleteBill,
-    payBill,
-    getBills,
     closeBill
-}
+};

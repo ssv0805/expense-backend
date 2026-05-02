@@ -67,4 +67,9 @@ const billSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+billSchema.index(
+  { name: 1, user: 1, dueDate: 1 },
+  { unique: true }
+);
+
 module.exports = mongoose.model("Bill", billSchema);

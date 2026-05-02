@@ -3,7 +3,7 @@ const Bill = require("../models/bill");
 const XLSX = require("xlsx");
 
 
-//  EXPORT TRANSACTIONS
+// ================= EXPORT =================
 const exportTransactions = async (req, res) => {
     try {
         if (!req.user) {
@@ -53,39 +53,18 @@ const exportTransactions = async (req, res) => {
 };
 
 
-//  UPDATE TRANSACTION
-const updateTransaction = async (req, res) => {
+// ================= ADD TRANSACTION =================
+const addTransaction = async (req, res) => {
     try {
-        const transaction = await Transaction.findById(req.params.id);
-
-        if (!transaction) {
-            return res.status(404).json({
-                message: "Transaction not found"
-            });
-        }
-
         const today =
             req.body.date || new Date().toISOString().split("T")[0];
+
         const currentMonth = today.slice(0, 7);
 
-        // BILL CATEGORY LOGIC
+        // ===== BILL LOGIC =====
         if (req.body.category?.toLowerCase().trim() === "bills") {
 
             const cleanName = req.body.to.trim().toLowerCase();
-            const today = req.body.date || new Date().toISOString().split("T")[0];
-            const currentMonth = today.slice(0, 7);
-
-            // ✅ revert old bill
-            if (transaction.billId) {
-                const oldBill = await Bill.findById(transaction.billId);
-
-                if (oldBill && oldBill.name !== cleanName) {
-                    oldBill.status = "unpaid";
-                    oldBill.lastPaidDate = null;
-                    oldBill.lastPaidMonth = null;
-                    await oldBill.save();
-                }
-            }
 
             let bill = await Bill.findOne({
                 name: cleanName,
@@ -94,11 +73,23 @@ const updateTransaction = async (req, res) => {
             });
 
             if (bill) {
+
+                // 🚫 Prevent duplicate payment
+                if (bill.status === "paid") {
+                    return res.status(400).json({
+                        message: "Bill already paid for this month"
+                    });
+                }
+
+                // ✅ Mark unpaid bill as paid
                 bill.status = "paid";
                 bill.lastPaidDate = today;
                 bill.lastPaidMonth = currentMonth;
+
                 await bill.save();
+
             } else {
+                // ✅ Create NEW bill if not exists
                 bill = await Bill.create({
                     name: cleanName,
                     amount: req.body.amount,
@@ -112,6 +103,108 @@ const updateTransaction = async (req, res) => {
                     user: req.user.email
                 });
             }
+
+            // 🔒 LOCK values (feature 7)
+            req.body.amount = bill.amount;
+            req.body.payment = bill.paymentMethod;
+            req.body.to = bill.name;
+
+            req.body.billId = bill._id;
+        }
+
+        const transaction = new Transaction({
+            ...req.body,
+            user: req.user.email,
+            date: today
+        });
+
+        const saved = await transaction.save();
+
+        res.status(201).json(saved);
+
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({
+            message: err.message
+        });
+    }
+};
+
+
+// ================= UPDATE TRANSACTION =================
+const updateTransaction = async (req, res) => {
+    try {
+        const transaction = await Transaction.findById(req.params.id);
+
+        if (!transaction) {
+            return res.status(404).json({
+                message: "Transaction not found"
+            });
+        }
+
+        const today =
+            req.body.date || new Date().toISOString().split("T")[0];
+
+        const currentMonth = today.slice(0, 7);
+
+        // ===== BILL LOGIC =====
+        if (req.body.category?.toLowerCase().trim() === "bills") {
+
+            const cleanName = req.body.to.trim().toLowerCase();
+
+            // 🔁 STEP 1: revert old bill
+            if (transaction.billId) {
+                const oldBill = await Bill.findById(transaction.billId);
+
+                if (oldBill) {
+                    oldBill.status = "unpaid";
+                    oldBill.lastPaidDate = null;
+                    oldBill.lastPaidMonth = null;
+                    await oldBill.save();
+                }
+            }
+
+            // 🔎 STEP 2: find or create new bill
+            let bill = await Bill.findOne({
+                name: cleanName,
+                user: req.user.email,
+                dueDate: { $regex: `^${currentMonth}` }
+            });
+
+            if (bill) {
+
+                if (bill.status === "paid") {
+                    return res.status(400).json({
+                        message: "Bill already paid for this month"
+                    });
+                }
+
+                bill.status = "paid";
+                bill.lastPaidDate = today;
+                bill.lastPaidMonth = currentMonth;
+
+                await bill.save();
+
+            } else {
+
+                bill = await Bill.create({
+                    name: cleanName,
+                    amount: req.body.amount,
+                    paymentMethod: req.body.payment || "UPI",
+                    category: "Bills",
+                    dueDate: today,
+                    frequency: "Monthly",
+                    status: "paid",
+                    lastPaidDate: today,
+                    lastPaidMonth: currentMonth,
+                    user: req.user.email
+                });
+            }
+
+            // 🔒 LOCK values
+            req.body.amount = bill.amount;
+            req.body.payment = bill.paymentMethod;
+            req.body.to = bill.name;
 
             req.body.billId = bill._id;
         }
@@ -133,84 +226,38 @@ const updateTransaction = async (req, res) => {
 };
 
 
-//  ADD TRANSACTION (CLEAN)
-const addTransaction = async (req, res) => {
+// ================= DELETE =================
+const deleteTransaction = async (req, res) => {
     try {
-        const today =
-            req.body.date || new Date().toISOString().split("T")[0];
+        const transaction = await Transaction.findById(req.params.id);
 
-        const currentMonth = today.slice(0, 7);
-
-        // BILL LOGIC
-        if (req.body.category?.toLowerCase().trim() === "bills") {
-
-            const cleanName = req.body.to.trim().toLowerCase();
-            const today = req.body.date || new Date().toISOString().split("T")[0];
-            const currentMonth = today.slice(0, 7);
-
-            let linkedBill;
-
-            const existingBill = await Bill.findOne({
-                name: cleanName,
-                user: req.user.email,
-                dueDate: { $regex: `^${currentMonth}` }
-            });
-
-            if (existingBill) {
-                if (
-                    existingBill.status === "paid" &&
-                    existingBill.lastPaidMonth === currentMonth
-                ) {
-                    return res.status(400).json({
-                        message: "Bill already paid for this month"
-                    });
-                }
-
-                existingBill.status = "paid";
-                existingBill.lastPaidDate = today;
-                existingBill.lastPaidMonth = currentMonth;
-
-                await existingBill.save();
-                linkedBill = existingBill;
-
-            } else {
-                // ✅ create ONLY if not exists
-                linkedBill = await Bill.create({
-                    name: cleanName,
-                    amount: req.body.amount,
-                    paymentMethod: req.body.payment || "UPI",
-                    category: "Bills",
-                    dueDate: today,
-                    frequency: "Monthly",
-                    status: "paid",
-                    lastPaidDate: today,
-                    lastPaidMonth: currentMonth,
-                    user: req.user.email
-                });
-            }
-
-            req.body.billId = linkedBill._id;
+        if (!transaction) {
+            return res.status(404).json({ message: "Transaction not found" });
         }
 
-        const transaction = new Transaction({
-            ...req.body,
-            user: req.user.email,
-            date: today
-        });
+        // 🔁 revert bill
+        if (transaction.billId) {
+            const bill = await Bill.findById(transaction.billId);
 
-        const saved = await transaction.save();
+            if (bill) {
+                bill.status = "unpaid";
+                bill.lastPaidDate = null;
+                bill.lastPaidMonth = null;
+                await bill.save();
+            }
+        }
 
-        res.status(201).json(saved);
+        await Transaction.findByIdAndDelete(req.params.id);
+
+        res.json({ success: true });
 
     } catch (err) {
-        console.log(err);
-        res.status(500).json({
-            message: err.message
-        });
+        res.status(500).json(err);
     }
 };
 
-//  GET ALL TRANSACTIONS (NO PAGINATION)
+
+// ================= GET =================
 const getAllTransactions = async (req, res) => {
     try {
         const data = await Transaction.find({
@@ -225,7 +272,6 @@ const getAllTransactions = async (req, res) => {
 };
 
 
-//  GET TRANSACTIONS (WITH FILTER + PAGINATION)
 const getTransactions = async (req, res) => {
     try {
         const { page = 1, limit = 7, category, type, month } = req.query;
@@ -246,7 +292,7 @@ const getTransactions = async (req, res) => {
         }
 
         const transactions = await Transaction.find(query)
-            .populate("billId") // ✅ keep this
+            .populate("billId")
             .sort({ date: -1 })
             .skip((page - 1) * limit)
             .limit(Number(limit));
@@ -266,38 +312,7 @@ const getTransactions = async (req, res) => {
 };
 
 
-//  DELETE TRANSACTION (FIXED )
-const deleteTransaction = async (req, res) => {
-    try {
-        const transaction = await Transaction.findById(req.params.id);
-
-        if (!transaction) {
-            return res.status(404).json({ message: "Transaction not found" });
-        }
-
-        // ✅ If linked to bill → revert bill
-        if (transaction.billId) {
-            const bill = await Bill.findById(transaction.billId);
-
-            if (bill) {
-                bill.status = "unpaid";   // ✅ FIXED
-                bill.lastPaidDate = null;
-                bill.lastPaidMonth = null;
-                await bill.save();
-            }
-        }
-
-        await Transaction.findByIdAndDelete(req.params.id);
-
-        res.json({ success: true });
-
-    } catch (err) {
-        res.status(500).json(err);
-    }
-};
-
-//get categories
-// GET DISTINCT CATEGORIES
+// ================= CATEGORIES =================
 const getCategories = async (req, res) => {
     try {
         const { type } = req.query;
